@@ -1,4 +1,4 @@
-package com.causeway.robot.telepresence;
+package com.three.robot.telepresence;
 val APP_ID="3412fc7b1bff4a20b0482ee79d6e3494" //agora app id
   var CHANNEL_NAME=     "365RobotAgora" // Channel name
 val APP_CERT="1a31fb2785e648249559e4780c6f69a8"

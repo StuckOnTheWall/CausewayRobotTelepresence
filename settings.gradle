@@ -14,5 +14,5 @@
  * limitations under the License.
  */
 
-rootProject.name = "CausewayRobotTelepresence"
+rootProject.name = "365RobotTelepresenceV2"
 include ':app'

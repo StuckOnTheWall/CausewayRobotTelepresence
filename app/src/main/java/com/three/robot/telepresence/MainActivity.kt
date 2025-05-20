@@ -1,9 +1,11 @@
-package com.causeway.robot.telepresence
+package com.three.robot.telepresence
 
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.Image
@@ -26,12 +28,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.causeway.robot.telepresence.R
 
 class MainActivity : AppCompatActivity() {
+
+    private val TIMEOUT_MS = 20_000L   // 20 seconds
 
     companion object {
         const val PREFS_NAME = "365RobotPrefs"
@@ -42,102 +47,149 @@ class MainActivity : AppCompatActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        TimeoutManager.initialize(this, TIMEOUT_MS)
+
         setContent {
             val context = LocalContext.current
             var robotSN by remember { mutableStateOf(loadRobotSN(context)) }
             var initialDistanceThresh by remember { mutableStateOf(loadDistanceThresh(context)) }
             var showDialog by remember { mutableStateOf(false) }
 
+            // Detect orientation
+            val configuration = LocalConfiguration.current
+            val isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+
             Box(modifier = Modifier.fillMaxSize()) {
-                // Full-screen background image
+                // Background image: in portrait, fill height and center-crop horizontally
                 Image(
-                    painter = painterResource(id = R.drawable.image_background),
+                    painter = painterResource(
+                        id = if (isPortrait)
+                            R.drawable.image_background_portrait
+                        else
+                            R.drawable.image_background
+                    ),
                     contentDescription = "Background",
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
+                    contentScale = if (isPortrait) ContentScale.FillHeight else ContentScale.Crop
                 )
 
-                // Transparent Scaffold overlays the background
                 Scaffold(
                     topBar = {
                         TopAppBar(
                             title = { Text("", color = Color.White) },
                             actions = {
-                                IconButton(onClick = { showDialog = true }) {
-                                    Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = Color.White)
+                                // Settings button (unchanged)
+                                IconButton(onClick = {
+                                    TimeoutManager.cancel()
+                                    showDialog = true }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Settings,
+                                        contentDescription = "Settings",
+                                        tint = Color.White
+                                    )
+                                }
+                                // Exit button (new)
+                                IconButton(onClick = {
+                                    // 1) Get the Xiaobao launch intent
+                                    val homeIntent = packageManager.getLaunchIntentForPackage("com.ainirobot.moduleapp")
+                                    if (homeIntent != null) {
+                                        // 2) Clear your stack and start Xiaobao
+                                        homeIntent.addFlags(
+                                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                                    Intent.FLAG_ACTIVITY_NEW_TASK
+                                        )
+                                        startActivity(homeIntent)
+                                    }
+                                    // 3) Finish this activity so nothing stays running
+                                    this@MainActivity.finish()
+                                }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.ExitToApp,
+                                        contentDescription = "Exit",
+                                        tint = Color.White
+                                    )
                                 }
                             },
-                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = Color.Transparent
+                            )
                         )
                     },
                     containerColor = Color.Transparent
                 ) { innerPadding ->
-                    // Column to position content: top section and join button at the bottom
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding)
                             .padding(horizontal = 20.dp),
-                        verticalArrangement = Arrangement.SpaceBetween,
+                        // portrait: center everything so the button floats up
+                        // landscape: keep your original SpaceBetween
+                        verticalArrangement = if (isPortrait)
+                            Arrangement.Center
+                        else
+                            Arrangement.SpaceBetween,
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // Top Section: Title and description text
+                        // (You said no title/subtitle needed, so we leave those empty
+                        // or you can remove this inner Column entirely if you never need it:)
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Spacer(modifier = Modifier.height(40.dp))
-                            Text(
-                                text = "",
+                            Spacer(modifier = Modifier.height( if (isPortrait) 0.dp else 40.dp ))
+                            Text(text = "",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 24.sp,
-                                color = Color.White
-                            )
+                                color = Color.White)
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "",
+                            Text(text = "",
                                 fontSize = 18.sp,
-                                color = Color.White
-                            )
+                                color = Color.White)
                         }
-                        // Bottom Section: Join button
+
+                        // Join button
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 30.dp),
+                                // in portrait, nudge the button up off the very bottom
+                                .padding(bottom = if (isPortrait) 20.dp else 30.dp),
                             contentAlignment = Alignment.BottomCenter
                         ) {
                             Button(
                                 onClick = {
                                     if (robotSN.isEmpty()) {
-                                        Toast.makeText(context, "Please set the Robot SN in Settings", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context,
+                                            "Please set the Robot SN in Settings",
+                                            Toast.LENGTH_SHORT).show()
                                         return@Button
                                     }
+
+                                    TimeoutManager.cancel()
+
                                     val intent = Intent(applicationContext, VideoActivity::class.java)
                                     intent.putExtra("RobotSN", robotSN)
                                     intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
                                     ContextCompat.startActivity(applicationContext, intent, Bundle())
                                 },
-                                modifier = Modifier.width(200.dp),
+                                modifier = Modifier
+                                    .width(200.dp)
+                                    // lift the button up another 10.dp
+                                    .offset(y = if (isPortrait) 140.dp else 0.dp),
                                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF37053))
                             ) {
-                                Icon(
-                                    imageVector = Icons.Filled.ArrowForward,
+                                Icon(Icons.Filled.ArrowForward,
                                     contentDescription = "Join",
                                     modifier = Modifier.size(24.dp),
-                                    tint = Color.White
-                                )
+                                    tint = Color.White)
                                 Spacer(modifier = Modifier.size(ButtonDefaults.IconSpacing))
-                                Text(
-                                    text = "Join Now",
+                                Text(text = "Join Now",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 18.sp,
-                                    color = Color.White
-                                )
+                                    color = Color.White)
                             }
                         }
                     }
                 }
 
-                // Settings Dialog for entering Robot SN
                 if (showDialog) {
                     SettingsDialog(
                         initialSN = robotSN,
@@ -146,16 +198,44 @@ class MainActivity : AppCompatActivity() {
                             robotSN = newSN
                             saveSettings(context, newSN, distanceThresh)
                             showDialog = false
-                            // Restart app
-                            startActivity(Intent(applicationContext, MainActivity::class.java))
+                            TimeoutManager.initialize(this@MainActivity, TIMEOUT_MS)
+                           // startActivity(Intent(applicationContext, MainActivity::class.java))
                         },
-                        onDismiss = { showDialog = false }
+                        onDismiss = { showDialog = false
+                            TimeoutManager.initialize(this@MainActivity, TIMEOUT_MS)
+                        }
+
                     )
                 }
             }
         }
-
     }
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        TimeoutManager.resetTimer(TIMEOUT_MS)
+    }
+
+    // ← And this at the bottom of the class, to clean up
+    override fun onDestroy() {
+        super.onDestroy()
+        TimeoutManager.cancel()
+
+        // Launch OrionStar Xiaobao home
+        val homeIntent = packageManager.getLaunchIntentForPackage("com.ainirobot.moduleapp")
+        if (homeIntent != null) {
+            homeIntent.addFlags(
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_NEW_TASK
+            )
+            startActivity(homeIntent)
+        }
+
+        // Finally kill our process so nothing lingers
+        this@MainActivity.finishAffinity()
+        kotlin.system.exitProcess(0)
+    }
+
 
     // ✅ Function to Load Robot SN from SharedPreferences
     private fun loadRobotSN(context: Context): String {
@@ -260,4 +340,3 @@ fun SettingsDialog(
         }
     )
 }
-//

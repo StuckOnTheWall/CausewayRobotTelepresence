@@ -24,15 +24,15 @@ plugins {
 
 
 android {
-    namespace 'com.causeway.robot.telepresence'
+    namespace 'com.three.robot.telepresence'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.causeway.robot.telepresence"
+        applicationId "com.three.robot.telepresence"
         minSdk 24
         targetSdk 34
         versionCode 1
-        versionName "1.0.0"
+        versionName "2.0.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }

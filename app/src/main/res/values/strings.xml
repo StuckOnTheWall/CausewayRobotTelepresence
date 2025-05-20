@@ -15,7 +15,7 @@
   -->
 
 <resources>
-    <string name="app_name">CausewayRobotTelepresence</string>
+    <string name="app_name">365RobotTelepresence2</string>
 
     <string name="camera_mode_none">None</string>
     <string name="camera_mode_auto">Auto</string>

@@ -1,4 +1,4 @@
-package com.causeway.robot.telepresence;
+package com.three.robot.telepresence;
 import android.Manifest
 import android.app.Activity
 import android.app.Notification
@@ -53,10 +53,10 @@ import com.ainirobot.coreservice.client.listener.TextListener
 import com.ainirobot.coreservice.client.speech.SkillApi
 import com.ainirobot.coreservice.client.speech.SkillCallback
 import com.ainirobot.coreservice.client.speech.entity.TTSEntity
-import com.causeway.robot.telepresence.MainActivity.Companion.KEY_DISTANCE_THRESH
-import com.causeway.robot.telepresence.MainActivity.Companion.KEY_ROBOT_SN
-import com.causeway.robot.telepresence.MainActivity.Companion.PREFS_NAME
-import com.causeway.robot.telepresence.R
+import com.three.robot.telepresence.MainActivity.Companion.KEY_DISTANCE_THRESH
+import com.three.robot.telepresence.MainActivity.Companion.KEY_ROBOT_SN
+import com.three.robot.telepresence.MainActivity.Companion.PREFS_NAME
+import com.three.robot.telepresence.R
 import dev.gustavoavila.websocketclient.WebSocketClient
 import io.agora.rtc.Constants
 import io.agora.rtc.IRtcEngineEventHandler
@@ -455,6 +455,9 @@ return
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        TimeoutManager.cancel()
+
         val sharedPreferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         robotSN = sharedPreferences.getString(KEY_ROBOT_SN, "") ?: ""
         distanceThresh = sharedPreferences.getString(KEY_DISTANCE_THRESH, "0") ?: "0"
@@ -471,24 +474,29 @@ return
         val userRole = "Broadcaster"
 
         setContent {
-            androidx.compose.material3.Scaffold {
-                println(it)
-                UIRequirePermissions(
-                    permissions = permissions,
-                    onPermissionGranted = {
-
-                        CallScreen(
-                            channelName,
-                            userRole,
-                            videoCallStateViewModel
-                        )
-                    },
-                    onPermissionDenied = {
-                        AlertScreen(it)
-                    }
-                )
+            androidx.compose.material3.Scaffold { innerPadding ->
+                // apply the scaffold’s insets + a uniform horizontal margin
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .padding(horizontal = 16.dp)
+                ) {
+                    UIRequirePermissions(
+                        permissions = permissions,
+                        onPermissionGranted = {
+                            CallScreen(
+                                channelName,
+                                userRole,
+                                videoCallStateViewModel
+                            )
+                        },
+                        onPermissionDenied = { AlertScreen(it) }
+                    )
+                }
             }
         }
+
 
 
     }
@@ -625,27 +633,63 @@ return
         }
 
         if (videoCallStateViewModel.currentState.value == VideoCallStateViewModel.CALL_STATE.READY) {
-            mEngine.setupLocalVideo(VideoCanvas(localSurfaceView, Constants.RENDER_MODE_FIT, 0))
+            mEngine.setupLocalVideo(VideoCanvas(localSurfaceView, Constants.RENDER_MODE_HIDDEN, 0))
             //mEngine.adjustPlaybackSignalVolume(0)
-            Box(Modifier.fillMaxSize()) {
-                Column(Modifier.fillMaxSize()) {
-                    Row(Modifier.weight(1f)) {
-                        localSurfaceView?.let { local ->
-                            AndroidView(factory = { local },
-                                Modifier
-                                    .weight(1f)
-                                    .padding(8.dp))
-                        }
-                        RemoteView(remoteListInfo = remoteUserMap, mEngine = mEngine,
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        // give the whole row its 8dp margin, not each pane
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Local
+                    AndroidView(
+                        factory = { localSurfaceView },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                        // no .background
+                        // no extra .padding
+                    )
+
+                    // 2) Remote – one AndroidView that’s bound to the first remote UID
+                    val firstRemoteEntry = remoteUserMap.entries.firstOrNull()
+                    if (firstRemoteEntry != null) {
+                        AndroidView(
+                            factory = {
+                                // reuse or create
+                                val tv = firstRemoteEntry.value
+                                    ?: RtcEngine.CreateTextureView(context)
+                                // bind the feed
+                                mEngine.setupRemoteVideo(
+                                    VideoCanvas(tv, Constants.RENDER_MODE_HIDDEN, firstRemoteEntry.key)
+                                )
+                                tv
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        )
+                    } else {
+                        // placeholder if nobody's joined yet
+                        Box(
                             Modifier
                                 .weight(1f)
-                                .padding(8.dp))
+                                .fillMaxHeight()
+                                .background(Color.LightGray)
+                        )
                     }
-                    UserControls(mEngine = mEngine,
-                        Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .padding(16.dp))
                 }
+
+                // Call controls
+                UserControls(
+                    mEngine = mEngine,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(16.dp)
+                )
             }
         }
     }
@@ -653,35 +697,41 @@ return
 
 
     @Composable
-    private fun RemoteView(remoteListInfo: Map<Int, TextureView?>, mEngine: RtcEngine, modifier: Modifier = Modifier) {
-        val context = LocalContext.current
+    private fun RemoteView(
+        remoteListInfo: Map<Int, TextureView?>,
+        mEngine: RtcEngine,
+        modifier: Modifier = Modifier
+    ) {
+        // 1) grab the Compose Context once
+        val ctx = LocalContext.current
+
         Column(
             modifier = modifier
                 .fillMaxHeight()
-                .verticalScroll(state = rememberScrollState())
+                .verticalScroll(rememberScrollState())
         ) {
-            remoteListInfo.forEach { entry ->
-                val remoteTextureView =
-                    RtcEngine.CreateTextureView(context).takeIf { entry.value == null } ?: entry.value
-                if(remoteTextureView == null) return
+            remoteListInfo.forEach { (uid, existingView) ->
                 AndroidView(
-                    factory = { remoteTextureView },
+                    factory = {
+                        // 2a) create or reuse the TextureView
+                        val tv = existingView ?: RtcEngine.CreateTextureView(ctx)
+                        // 2b) bind the remote feed to that view
+                        mEngine.setupRemoteVideo(
+                            VideoCanvas(tv, Constants.RENDER_MODE_HIDDEN, uid)
+                        )
+                        // 2c) return it for rendering
+                        tv
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(180.dp)
+                        .weight(1f)          // match your local pane’s weight
                         .padding(8.dp)
-                        .background(Color.Black)
-                )
-                mEngine.setupRemoteVideo(
-                    VideoCanvas(
-                        remoteTextureView,
-                        Constants.RENDER_MODE_HIDDEN,
-                        entry.key
-                    )
+
                 )
             }
         }
     }
+
 
 
     fun initEngine(current: Context, eventHandler: IRtcEngineEventHandler, channelName: String, userRole: String,videoCallStateViewModel: VideoCallStateViewModel): RtcEngine =
